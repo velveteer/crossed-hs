@@ -23,6 +23,8 @@ executable crossed
     , bytestring
     , containers
     , MonadRandom
+    , logict
+    , mtl
     , random
     , random-shuffle
     , vector

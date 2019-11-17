@@ -5,8 +5,9 @@ module Main where
 import Prelude hiding (Word)
 
 import Control.Applicative (ZipList(..))
-import Control.Monad (guard, replicateM_, when, void)
+import Control.Monad (MonadPlus(..), guard, replicateM_, when, void)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Logic
 import Control.Monad.Random (RandT, evalRandIO, uniform)
 import Data.Bifunctor (second)
 import Data.Foldable (for_)
@@ -58,9 +59,31 @@ data Cell =
 
 type Grid = [GWord]
 
--- TODO Validation and backtracking
-placeWord :: Grid -> GWord -> Grid
-placeWord grid gword = gword : grid
+buildGWord :: (Int, Int) -> Direction -> Line -> GWord
+buildGWord (x,y) d line =
+  let (w, c) = ((,) <$> word <*> clue) line
+  in GWord x y (BS.length w) d w c
+
+placeInitialWord :: MonadPlus m => [Line] -> TemplateMap -> Int -> m (GWord, Grid)
+placeInitialWord batch tmap size = do
+  gword <- msum [pure $ buildGWord (0,0) Across x | x <- take 100 batch]
+  guard $ canPlaceWord size mempty gword
+  pure (gword, gword:mempty)
+
+canPlaceWord :: Int -> Grid -> GWord -> Bool
+canPlaceWord size g gw =
+  let gwcs = getCells gw
+      gcs  = getGrid size g
+      maxX = cx $ List.maximumBy (comparing cx) gcs
+      maxY = cy $ List.maximumBy (comparing cy) gcs
+  in
+  all (\gwc -> cx gwc <= maxX && cy gwc <= maxY) gwcs
+
+getNextWords :: Int -> Grid -> TemplateMap -> GWord -> IO [(Word, Clue)]
+getNextWords size g tmap gw = do
+  let tmps = getTemplates size g gw
+  words <- matchAllTemplates tmap tmps
+  pure $ List.sortOn (BS.length . fst) words
 
 getCells :: GWord -> [Cell]
 getCells gw =
@@ -110,12 +133,6 @@ matchAllTemplates tmap tmps = do
   let cds = filter (not . null) $ fmap (List.foldl1 List.intersect) candidates
   evalRandIO $ traverse uniform cds
 
-getNextWord :: Int -> Grid -> TemplateMap -> GWord -> IO (Word, Clue)
-getNextWord size g tmap gw = do
-  let tmps = getTemplates size g gw
-  words <- matchAllTemplates tmap tmps
-  pure $ List.maximumBy (comparing (BS.length . fst)) words
-
 printGrid :: Int -> Grid -> IO ()
 printGrid size grid =
   for_ [0..size] $ \i -> do
@@ -139,16 +156,11 @@ main :: IO ()
 main = do
   lines <- BS.lines <$> BS.readFile "clues-desc.tsv"
   batch <- take 10000 <$> Random.shuffleM lines
-  gen <- Random.newStdGen
-  let total       = length batch
-      (i, gen')   = Random.randomR (0, total) gen
-      size        = 10
-      (w, c)      = (,) <$> word <*> clue $ (batch !! i)
-      firstGWord  = GWord 0 0 (BS.length w) Across w c
-      tmap        = linesToMap batch
-      grid        = placeWord mempty firstGWord
+  let size           = 4
+      tmap           = linesToMap batch
+      (active, grid) = observe $ placeInitialWord batch tmap size
   printGrid size grid
   putStrLn "Current words: "
   printClues grid
-  putStrLn "Candidate for next word: "
-  print =<< getNextWord size grid tmap (last grid)
+  putStrLn "Candidates for next word: "
+  print =<< getNextWords size grid tmap active
