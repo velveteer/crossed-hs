@@ -12,7 +12,7 @@ import Control.Monad.Random (RandT, evalRandIO, uniform)
 import Data.Bifunctor (second)
 import Data.Foldable (for_)
 import Data.Map.Strict (Map)
-import Data.Maybe (catMaybes, fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
 import Data.Ord (comparing)
 import Data.Traversable (for)
 import qualified Data.ByteString.Char8 as BS
@@ -52,23 +52,29 @@ data GWord =
         } deriving (Eq, Show)
 
 data Cell =
-  Cell { cc :: !(Maybe Char)
+  Cell { cc :: !Char
        , cx :: !Int
        , cy :: !Int
        } deriving (Eq, Show)
 
 type Grid = [GWord]
 
-buildGWord :: (Int, Int) -> Direction -> Line -> GWord
-buildGWord (x,y) d line =
-  let (w, c) = ((,) <$> word <*> clue) line
-  in GWord x y (BS.length w) d w c
+buildGWord :: (Int, Int) -> Direction -> (Word, Clue) -> GWord
+buildGWord (x,y) d (w, c) = GWord x y (BS.length w) d w c
 
-placeInitialWord :: MonadPlus m => [Line] -> TemplateMap -> Int -> m (GWord, Grid)
-placeInitialWord batch tmap size = do
-  gword <- msum [pure $ buildGWord (0,0) Across x | x <- take 100 batch]
+placeInitialWord :: MonadPlus m => [Line] -> Int -> m (GWord, Grid)
+placeInitialWord batch size = do
+  gword <- msum [pure $ buildGWord (0,0) Across (word x, clue x) | x <- take 100 batch]
+  guard $ l gword >= 5
   guard $ canPlaceWord size mempty gword
   pure (gword, gword:mempty)
+
+placeNextWord :: (MonadIO m, MonadPlus m) => Int -> Grid -> TemplateMap -> GWord -> m (GWord, Grid)
+placeNextWord size grid tmap active = do
+  possibleWords <- liftIO $ getNextWords size grid tmap active
+  nextWord <- msum [pure x | x <- possibleWords]
+  guard $ canPlaceWord size grid nextWord
+  pure (nextWord, nextWord:grid)
 
 canPlaceWord :: Int -> Grid -> GWord -> Bool
 canPlaceWord size g gw =
@@ -79,23 +85,23 @@ canPlaceWord size g gw =
   in
   all (\gwc -> cx gwc <= maxX && cy gwc <= maxY) gwcs
 
-getNextWords :: Int -> Grid -> TemplateMap -> GWord -> IO [(Word, Clue)]
+getNextWords :: Int -> Grid -> TemplateMap -> GWord -> IO [GWord]
 getNextWords size g tmap gw = do
-  let tmps = getTemplates size g gw
-  words <- matchAllTemplates tmap tmps
-  pure $ List.sortOn (BS.length . fst) words
+  let plcs = getPlacements 0 size g gw
+  gwords <- matchAllTemplates tmap gw plcs
+  pure $ List.sortOn l gwords
 
 getCells :: GWord -> [Cell]
 getCells gw =
   case d gw of
     Across ->
       getZipList $
-        Cell <$> ZipList (Just <$> BS.unpack (w gw))
+        Cell <$> ZipList (BS.unpack (w gw))
              <*> ZipList [x gw..]
              <*> ZipList (repeat $ y gw)
     Down ->
       getZipList $
-        Cell <$> ZipList (Just <$> BS.unpack (w gw))
+        Cell <$> ZipList (BS.unpack (w gw))
              <*> ZipList (repeat $ x gw)
              <*> ZipList [y gw..]
 
@@ -103,41 +109,51 @@ getGrid :: Int -> Grid -> [Cell]
 getGrid size grid =
     List.unionBy (\a b -> cx a == cx b && cy a == cy b)
     (concatMap getCells grid)
-    (Cell <$> [Nothing] <*> [0..size] <*> [0..size])
+    (Cell <$> [' '] <*> [0..size] <*> [0..size])
 
-getTemplates :: Int -> Grid -> GWord -> [[Template]]
-getTemplates size grid gw =
+data Placement =
+  Placement
+    { startX :: !Int
+    , startY :: !Int
+    , templates :: [Template]
+    } deriving (Eq, Show)
+
+-- TODO Reject starts greater than the word position
+getPlacements :: Int -> Int -> Grid -> GWord -> [Placement]
+getPlacements start size grid gw =
   let gcs = getGrid size grid
       gwcs = getCells gw
   in
   case d gw of
-    Across -> removeInvalid $ flip fmap gwcs $ \cell ->
-      fmap ((,) <$> cy <*> cc)  (filter (\c -> cx c == cx cell) gcs)
-    Down -> removeInvalid $ flip fmap gwcs $ \cell ->
-      fmap ((,) <$> cx <*> cc)  (filter (\c -> cy c == cy cell) gcs)
-
-removeInvalid :: [[(Int, Maybe Char)]] -> [[Template]]
-removeInvalid tmps = fmap concat $ fmap clean <$> tmps
-  where
-    clean tmp =
-      case snd tmp of
-        Just n  -> pure (fst tmp, n)
-        Nothing -> mempty
+    Across -> concat $ flip fmap gwcs $ \cell ->
+      getZipList $ Placement
+        <$> ZipList [cx cell]
+        <*> ZipList [start..]
+        <*> ZipList [(,) <$> (flip (-) start . cy) <*> cc <$> filter (\c -> cx c == cx cell && cy c >= start) gcs]
+    Down -> concat $ flip fmap gwcs $ \cell ->
+      getZipList $ Placement
+        <$> ZipList [start..]
+        <*> ZipList [cy cell]
+        <*> ZipList [(,) <$> (flip (-) start .cx) <*> cc <$> filter (\c -> cy c == cy cell && cx c >= start) gcs]
 
 matchTemplate :: TemplateMap -> Template -> [(Word, Clue)]
 matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
 
-matchAllTemplates :: TemplateMap -> [[Template]] -> IO [(Word, Clue)]
-matchAllTemplates tmap tmps = do
-  let candidates = fmap (matchTemplate tmap) <$> tmps
-  let cds = filter (not . null) $ fmap (List.foldl1 List.intersect) candidates
-  evalRandIO $ traverse uniform cds
+matchAllTemplates :: TemplateMap -> GWord -> [Placement] -> IO [GWord]
+matchAllTemplates tmap gword plcs = for plcs $ \plc -> do
+  let candidates = concatMap (matchTemplate tmap) (templates plc)
+  let cds = concat $ filter (not . null) $ List.groupBy (\a b -> fst a == fst b) candidates
+  word <- evalRandIO $ uniform cds
+  pure $ buildGWord (startX plc, startY plc) (d $ switchDirection gword) word
+
+switchDirection :: GWord -> GWord
+switchDirection gword = gword { d = if d gword == Across then Down else Across }
 
 printGrid :: Int -> Grid -> IO ()
 printGrid size grid =
   for_ [0..size] $ \i -> do
     for_ [0..size] $ \j -> do
-      let mChar = cc =<< List.find
+      let mChar = cc <$> List.find
                   (\c -> cx c == j && cy c == i)
                   (concatMap getCells grid)
       case mChar of
@@ -156,11 +172,12 @@ main :: IO ()
 main = do
   lines <- BS.lines <$> BS.readFile "clues-desc.tsv"
   batch <- take 10000 <$> Random.shuffleM lines
-  let size           = 4
+  let size           = 6
       tmap           = linesToMap batch
-      (active, grid) = observe $ placeInitialWord batch tmap size
-  printGrid size grid
+  (active, grid) <- observeT $ placeInitialWord batch size
+  (active', grid') <- observeT $ placeNextWord size grid tmap active
+  printGrid size grid'
   putStrLn "Current words: "
-  printClues grid
+  printClues grid'
   putStrLn "Candidates for next word: "
-  print =<< getNextWords size grid tmap active
+  print =<< getNextWords size grid' tmap active'
