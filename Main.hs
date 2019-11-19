@@ -12,7 +12,7 @@ import Control.Monad.Random (RandT, evalRandIO, uniform)
 import Data.Bifunctor (second)
 import Data.Foldable (for_)
 import Data.Map.Strict (Map)
-import Data.Maybe (catMaybes, fromJust, fromMaybe, isJust)
+import Data.Maybe (catMaybes, fromMaybe, isNothing)
 import Data.Ord (comparing)
 import Data.Traversable (for)
 import qualified Data.ByteString.Char8 as BS
@@ -21,6 +21,8 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified System.Random as Random
 import qualified System.Random.Shuffle as Random
+
+import Debug.Trace
 
 type Line = BS.ByteString
 type Word = BS.ByteString
@@ -62,6 +64,17 @@ type Grid = [GWord]
 buildGWord :: (Int, Int) -> Direction -> (Word, Clue) -> GWord
 buildGWord (x,y) d (w, c) = GWord x y (BS.length w) d w c
 
+generateGrid :: (MonadIO m, MonadPlus m) => [Line] -> TemplateMap -> Int -> m Grid
+generateGrid batch tmap size = do
+  (gword, grid) <- placeInitialWord batch size
+  let loop gw g k = do
+        (gword', grid') <- placeNextWord size g tmap gw
+        if k == 0
+        then pure grid'
+        else loop gword' grid' (k - 1)
+  -- TODO Use a better heuristic
+  loop gword grid 10
+
 placeInitialWord :: MonadPlus m => [Line] -> Int -> m (GWord, Grid)
 placeInitialWord batch size = do
   gword <- msum [pure $ buildGWord (0,0) Across (word x, clue x) | x <- take 100 batch]
@@ -80,14 +93,53 @@ canPlaceWord :: Int -> Grid -> GWord -> Bool
 canPlaceWord size g gw =
   let gwcs = getCells gw
       gcs  = getGrid size g
+      xys = fmap ((,) <$> cx <*> cy )
+      acrossWords = filter (\gw -> d gw == Across) g
+      downWords = filter (\gw -> d gw == Down) g
+      acrossCells = xys $ getCells `concatMap` acrossWords
+      downCells = xys $ getCells `concatMap` downWords
+      gridCells = getCells `concatMap` g
+      starts = head . xys . getCells <$> g
+      lasts = last . xys . getCells <$> g
       maxX = cx $ List.maximumBy (comparing cx) gcs
       maxY = cy $ List.maximumBy (comparing cy) gcs
+      overlapsX = any (`elem` acrossCells) (xys gwcs)
+      overlapsY = any (`elem` downCells) (xys gwcs)
+      getCell x y = List.find (\c -> cx c == x && cy c == y) gcs
+      allTheSame xs = null xs || all (== head xs) (tail xs)
+      intersectsMatch =
+        allTheSame $ cc
+          <$> List.intersectBy
+              (\a b -> cx a == cx b && cy a == cy b)
+              gwcs gridCells
   in
-  all (\gwc -> cx gwc <= maxX && cy gwc <= maxY) gwcs
+     all (\gwc -> cx gwc <= maxX && cy gwc <= maxY) gwcs
+     && (if d gw == Across then not overlapsX else not overlapsY)
+     && intersectsMatch
+     && if d gw == Down
+        then all (\c -> (cx c + 1, cy c - 1) `notElem` downCells) gwcs
+             && all (\c -> (cx c - 1, cy c + 1) `notElem` downCells) gwcs
+             && all (\c -> (cx c, cy c - 1) `notElem` downCells) gwcs
+             && all (\c -> (cx c, cy c + 1) `notElem` downCells) gwcs
+             && all (\c -> (cx c + 1, cy c) `notElem` starts) gwcs
+             && all (\c -> (cx c - 1, cy c) `notElem` lasts) gwcs
+             && all (\c -> (cx c, cy c + 1) `notElem` lasts) gwcs
+             && (x gw, y gw - 1) `notElem` acrossCells
+             && (x gw, y gw + 1) `notElem` acrossCells
+        else all (\c -> (cx c - 1, cy c + 1) `notElem` acrossCells) gwcs
+             && all (\c -> (cx c + 1, cy c - 1) `notElem` acrossCells) gwcs
+             && all (\c -> (cx c - 1, cy c) `notElem` acrossCells) gwcs
+             && all (\c -> (cx c + 1, cy c) `notElem` acrossCells) gwcs
+             && all (\c -> (cx c, cy c + 1) `notElem` starts) gwcs
+             && all (\c -> (cx c, cy c - 1) `notElem` lasts) gwcs
+             && all (\c -> (cx c, cy c + 1) `notElem` lasts) gwcs
+             && (x gw - 1, y gw) `notElem` downCells
+             && (x gw + 1, y gw) `notElem` downCells
 
-getNextWords :: Int -> Grid -> TemplateMap -> GWord -> IO [GWord]
+getNextWords :: (MonadPlus m, MonadIO m) => Int -> Grid -> TemplateMap -> GWord -> m [GWord]
 getNextWords size g tmap gw = do
-  let plcs = getPlacements 0 size g gw
+  let end = if d gw == Across then y gw else x gw
+      plcs = concat $ getPlacements <$> [0..end] <*> [size] <*> [g] <*> [gw]
   gwords <- matchAllTemplates tmap gw plcs
   pure $ List.sortOn l gwords
 
@@ -113,12 +165,12 @@ getGrid size grid =
 
 data Placement =
   Placement
-    { startX :: !Int
-    , startY :: !Int
+    { startX    :: !Int
+    , startY    :: !Int
+    , direction :: !Direction
     , templates :: [Template]
     } deriving (Eq, Show)
 
--- TODO Reject starts greater than the word position
 getPlacements :: Int -> Int -> Grid -> GWord -> [Placement]
 getPlacements start size grid gw =
   let gcs = getGrid size grid
@@ -129,21 +181,28 @@ getPlacements start size grid gw =
       getZipList $ Placement
         <$> ZipList [cx cell]
         <*> ZipList [start..]
+        <*> ZipList [Down]
         <*> ZipList [(,) <$> (flip (-) start . cy) <*> cc <$> filter (\c -> cx c == cx cell && cy c >= start) gcs]
     Down -> concat $ flip fmap gwcs $ \cell ->
       getZipList $ Placement
         <$> ZipList [start..]
         <*> ZipList [cy cell]
-        <*> ZipList [(,) <$> (flip (-) start .cx) <*> cc <$> filter (\c -> cy c == cy cell && cx c >= start) gcs]
+        <*> ZipList [Across]
+        <*> ZipList [(,) <$> (flip (-) start . cx) <*> cc <$> filter (\c -> cy c == cy cell && cx c >= start) gcs]
 
 matchTemplate :: TemplateMap -> Template -> [(Word, Clue)]
 matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
 
-matchAllTemplates :: TemplateMap -> GWord -> [Placement] -> IO [GWord]
+matchAllTemplates :: (MonadPlus m, MonadIO m) => TemplateMap -> GWord -> [Placement] -> m [GWord]
 matchAllTemplates tmap gword plcs = for plcs $ \plc -> do
   let candidates = concatMap (matchTemplate tmap) (templates plc)
-  let cds = concat $ filter (not . null) $ List.groupBy (\a b -> fst a == fst b) candidates
-  word <- evalRandIO $ uniform cds
+      cds =   Set.toList
+            . Set.fromList
+            $ concat
+            $ filter (not . null)
+            $ List.groupBy (\a b -> fst a == fst b) candidates
+  -- TODO This isn't the best
+  word <- liftIO . evalRandIO $ uniform cds
   pure $ buildGWord (startX plc, startY plc) (d $ switchDirection gword) word
 
 switchDirection :: GWord -> GWord
@@ -164,20 +223,22 @@ printGrid size grid =
     putStrLn "\n"
 
 printClues :: Grid -> IO ()
-printClues grid =
-  for_ grid $ \gword ->
-    putStrLn $ show (w gword) ++ ": " ++ show (c gword)
+printClues grid = do
+  let across = zip [1..] (filter ((==) Across . d) grid)
+      down = zip [1..] (filter ((==) Down . d) grid)
+  for_ across $ \(num, gword) -> do
+    putStrLn "Across"
+    putStrLn $ show num ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
+  for_ down $ \(num, gword) -> do
+    putStrLn "Down"
+    putStrLn $ show num ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
 
 main :: IO ()
 main = do
   lines <- BS.lines <$> BS.readFile "clues-desc.tsv"
   batch <- take 10000 <$> Random.shuffleM lines
-  let size           = 6
+  let size           = 10
       tmap           = linesToMap batch
-  (active, grid) <- observeT $ placeInitialWord batch size
-  (active', grid') <- observeT $ placeNextWord size grid tmap active
-  printGrid size grid'
-  putStrLn "Current words: "
-  printClues grid'
-  putStrLn "Candidates for next word: "
-  print =<< getNextWords size grid' tmap active'
+  grid <- observeT $ generateGrid batch tmap size
+  printGrid size grid
+  printClues grid
