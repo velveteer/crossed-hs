@@ -14,7 +14,7 @@ import Control.Monad.Logic
 import Control.Monad.Random (evalRandIO, uniform)
 import Data.Foldable (for_)
 import Data.Map.Strict (Map)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Ord (comparing)
 import Data.Traversable (for)
 import qualified Data.ByteString.Char8 as BS
@@ -145,7 +145,7 @@ matchTemplate :: TemplateMap -> Template -> [(Word, Clue)]
 matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
 
 matchAllTemplates :: (MonadPlus m, MonadIO m) => TemplateMap -> GWord -> [Placement] -> m [GWord]
-matchAllTemplates tmap gword plcs = for plcs $ \plc -> do
+matchAllTemplates tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
   let candidates = concatMap (matchTemplate tmap) (templates plc)
       cds =   Set.toList
             . Set.fromList
@@ -153,15 +153,11 @@ matchAllTemplates tmap gword plcs = for plcs $ \plc -> do
             $ filter (not . null)
             $ List.groupBy (\a b -> fst a == fst b) candidates
   if null cds
-  then pure
-    $ buildGWord
-      (startX plc, startY plc)
-      (d $ switchDirection gword)
-      (w gword, c gword)
+  then pure Nothing
   else do
     word <- liftIO . evalRandIO $ uniform cds
-    pure
-      $ buildGWord
+    pure $
+      Just $ buildGWord
       (startX plc, startY plc)
       (d $ switchDirection gword)
       word
