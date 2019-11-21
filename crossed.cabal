@@ -8,25 +8,19 @@ version:             0.1.0.0
 license-file:        LICENSE
 author:              Josh Miller
 maintainer:          notjoshmiller@gmail.com
--- copyright:
--- category:
 build-type:          Simple
 extra-source-files:  CHANGELOG.md
 
 executable crossed
   main-is:             Main.hs
-  -- other-modules:
-  -- other-extensions:
-  --   OverloadedStrings
+  ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
   build-depends:       
-      base >=4.12 && <4.13
+      async
+    , base 
     , bytestring
     , containers
     , MonadRandom
     , logict
     , mtl
-    , random
     , random-shuffle
-    , vector
-  -- hs-source-dirs:
   default-language:    Haskell2010
