@@ -102,12 +102,10 @@ canPlaceWord size g gw =
       maxY = cy $ List.maximumBy (comparing cy) gcs
       overlapsX = any (`elem` acrossCells) (xys gwcs)
       overlapsY = any (`elem` downCells) (xys gwcs)
-      allTheSame xs = null xs || all (== head xs) (tail xs)
       intersectsMatch =
-        allTheSame $ fmap cc
-          <$> List.group (List.intersectBy
-              (\a b -> cx a == cx b && cy a == cy b)
-              gridCells gwcs)
+        List.intersectBy (\a b -> cx a == cx b && cy a == cy b) gridCells gwcs
+        ==
+        List.intersectBy (\a b -> cx a == cx b && cy a == cy b && cc a == cc b) gridCells gwcs
   in
      w gw `notElem` (w <$> g)
      && all (\gwc -> cx gwc <= maxX && cy gwc <= maxY) gwcs
