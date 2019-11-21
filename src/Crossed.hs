@@ -104,10 +104,10 @@ canPlaceWord size g gw =
       overlapsY = any (`elem` downCells) (xys gwcs)
       allTheSame xs = null xs || all (== head xs) (tail xs)
       intersectsMatch =
-        allTheSame $ cc
-          <$> List.intersectBy
+        allTheSame $ fmap cc
+          <$> List.group (List.intersectBy
               (\a b -> cx a == cx b && cy a == cy b)
-              gridCells gwcs
+              gridCells gwcs)
   in
      w gw `notElem` (w <$> g)
      && all (\gwc -> cx gwc <= maxX && cy gwc <= maxY) gwcs
@@ -139,8 +139,35 @@ getNextWords :: (MonadPlus m, MonadIO m) => Int -> Grid -> TemplateMap -> GWord 
 getNextWords size g tmap gw = do
   let end = if d gw == Across then y gw else x gw
       plcs = concat $ getPlacements <$> [0..end] <*> [size] <*> [g] <*> [gw]
-  gwords <- matchAllTemplates tmap gw plcs
-  pure $ List.sortOn l gwords
+  matchAllTemplates tmap gw plcs
+
+matchTemplate :: TemplateMap -> Template -> [(Word, Clue)]
+matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
+
+matchAllTemplates :: (MonadPlus m, MonadIO m) => TemplateMap -> GWord -> [Placement] -> m [GWord]
+matchAllTemplates tmap gword plcs = for plcs $ \plc -> do
+  let candidates = concatMap (matchTemplate tmap) (templates plc)
+      cds =   Set.toList
+            . Set.fromList
+            $ concat
+            $ filter (not . null)
+            $ List.groupBy (\a b -> fst a == fst b) candidates
+  if null cds
+  then pure
+    $ buildGWord
+      (startX plc, startY plc)
+      (d $ switchDirection gword)
+      (w gword, c gword)
+  else do
+    word <- liftIO . evalRandIO $ uniform cds
+    pure
+      $ buildGWord
+      (startX plc, startY plc)
+      (d $ switchDirection gword)
+      word
+
+switchDirection :: GWord -> GWord
+switchDirection gword = gword { d = if d gword == Across then Down else Across }
 
 getCells :: GWord -> [Cell]
 getCells gw =
@@ -191,34 +218,6 @@ getPlacements start size grid gw =
         <*> ZipList [cy cell]
         <*> ZipList [Across]
         <*> ZipList [(,) <$> (flip (-) start . cx) <*> cc <$> filter (\c -> cy c == cy cell && cx c >= start) gcs]
-
-matchTemplate :: TemplateMap -> Template -> [(Word, Clue)]
-matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
-
-matchAllTemplates :: (MonadPlus m, MonadIO m) => TemplateMap -> GWord -> [Placement] -> m [GWord]
-matchAllTemplates tmap gword plcs = for plcs $ \plc -> do
-  let candidates = concatMap (matchTemplate tmap) (templates plc)
-      cds =   Set.toList
-            . Set.fromList
-            $ concat
-            $ filter (not . null)
-            $ List.groupBy (\a b -> fst a == fst b) candidates
-  if null cds
-  then pure
-    $ buildGWord
-      (startX plc, startY plc)
-      (d $ switchDirection gword)
-      (w gword, c gword)
-  else do
-    word <- liftIO . evalRandIO $ uniform cds
-    pure
-      $ buildGWord
-      (startX plc, startY plc)
-      (d $ switchDirection gword)
-      word
-
-switchDirection :: GWord -> GWord
-switchDirection gword = gword { d = if d gword == Across then Down else Across }
 
 printGrid :: Int -> Grid -> IO ()
 printGrid size grid = do
