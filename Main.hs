@@ -181,15 +181,19 @@ getPlacements :: Int -> Int -> Grid -> GWord -> [Placement]
 getPlacements start size grid gw =
   let gcs = getGrid size grid
       gwcs = getCells gw
+      acrossWords = filter (\c -> d c == Across) grid
+      downWords = filter (\c -> d c == Down) grid
+      acrossCells = getCells `concatMap` acrossWords
+      downCells = getCells `concatMap` downWords
   in
   case d gw of
-    Across -> concat $ flip fmap gwcs $ \cell ->
+    Across -> concat $ flip fmap acrossCells $ \cell ->
       getZipList $ Placement
         <$> ZipList [cx cell]
         <*> ZipList [start..]
         <*> ZipList [Down]
         <*> ZipList [(,) <$> (flip (-) start . cy) <*> cc <$> filter (\c -> cx c == cx cell && cy c >= start) gcs]
-    Down -> concat $ flip fmap gwcs $ \cell ->
+    Down -> concat $ flip fmap downCells $ \cell ->
       getZipList $ Placement
         <$> ZipList [start..]
         <*> ZipList [cy cell]
