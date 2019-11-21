@@ -5,22 +5,32 @@ version:             0.1.0.0
 -- description:
 -- bug-reports:
 -- license:
-license-file:        LICENSE
+-- license-file:        LICENSE
 author:              Josh Miller
 maintainer:          notjoshmiller@gmail.com
 build-type:          Simple
 extra-source-files:  CHANGELOG.md
 
-executable crossed
-  main-is:             Main.hs
-  ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
+library 
+  ghc-options: -Wall -Wcompat -O2 -Wno-name-shadowing
+  exposed-modules: Crossed
   build-depends:       
-      async
-    , base 
+      base 
     , bytestring
     , containers
     , MonadRandom
     , logict
     , mtl
     , random-shuffle
-  default-language:    Haskell2010
+  hs-source-dirs: src
+  default-language: Haskell2010
+
+executable crossed-exe
+  main-is: Main.hs
+  ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
+  build-depends:       
+      async
+    , base 
+    , bytestring
+    , crossed
+  default-language: Haskell2010
