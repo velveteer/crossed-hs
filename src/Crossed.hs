@@ -8,8 +8,6 @@ module Crossed
 import Prelude hiding (Word)
 
 import Control.Applicative (ZipList(..))
-import Control.Monad (MonadPlus(..), guard, unless, when)
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logic
 import Control.Monad.Random (evalRandIO, uniform)
 import Data.Foldable (for_)
@@ -68,14 +66,14 @@ generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int
 generateGrid v batch tmap size minStart minWords gas = do
   (gword, grid) <- placeInitialWord batch minStart
   asRef <- liftIO $ newIORef (0 :: Int)
-  let loop gw g k = do
+  let loop gw g = do
         (gword', grid') <- placeNextWord v size g tmap gw
         liftIO $ modifyIORef' asRef (+1)
         as <- liftIO $ readIORef asRef
-        if as > gas || k == 0
+        if as > gas || (length grid' == minWords)
         then pure grid'
-        else loop gword' grid' (k - 1)
-  loop gword grid (minWords - 2)
+        else loop gword' grid'
+  loop gword grid
 
 placeInitialWord :: (MonadIO m, MonadPlus m) => [Line] -> Int -> m (GWord, Grid)
 placeInitialWord batch minStart = do

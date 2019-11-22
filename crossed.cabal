@@ -29,8 +29,7 @@ executable crossed-exe
   main-is: Main.hs
   ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
   build-depends:       
-      async
-    , base 
+      base 
     , bytestring
     , crossed
     , optparse-applicative

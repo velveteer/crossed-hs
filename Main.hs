@@ -14,7 +14,7 @@ data Options =
     , batchSize :: Int
     , gridSize  :: Int
     , minStart  :: Int
-    , minWords  :: Int
+    , words     :: Int
     , gas       :: Int
     }
 
@@ -50,9 +50,9 @@ options = Options
       <> metavar "INT"
       )
   <*> option auto
-      (  long "minWords"
+      (  long "words"
       <> short 'w'
-      <> help "Number of words to fill before returning a solution. Increases generation time."
+      <> help "Number of words needed for a solution. Increases generation time."
       <> showDefault
       <> value 30
       <> metavar "INT"
@@ -77,5 +77,5 @@ main :: IO ()
 main = do
   Options{..} <- execParser optionsInfo
   lines <- BS.lines <$> BS.readFile "clues-desc.tsv"
-  grid <- run visualize lines batchSize gridSize minStart minWords gas
+  grid <- run visualize lines batchSize gridSize minStart words gas
   printGrid False gridSize grid
