@@ -65,7 +65,7 @@ buildGWord :: (Int, Int) -> Direction -> (Word, Clue) -> GWord
 buildGWord (x,y) d (w, c) = GWord x y (BS.length w) d w c
 
 generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int -> Int -> Int -> Int -> m Grid
-generateGrid v batch tmap size minStart maxWords gas = do
+generateGrid v batch tmap size minStart minWords gas = do
   (gword, grid) <- placeInitialWord batch minStart
   asRef <- liftIO $ newIORef (0 :: Int)
   let loop gw g k = do
@@ -75,7 +75,7 @@ generateGrid v batch tmap size minStart maxWords gas = do
         if as > gas || k == 0
         then pure grid'
         else loop gword' grid' (k - 1)
-  loop gword grid (maxWords - 2)
+  loop gword grid (minWords - 2)
 
 placeInitialWord :: (MonadIO m, MonadPlus m) => [Line] -> Int -> m (GWord, Grid)
 placeInitialWord batch minStart = do
@@ -248,7 +248,7 @@ printClues grid = do
     putStrLn $ show (num :: Int) ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
 
 run :: Bool -> [Line] -> Int -> Int -> Int -> Int -> Int -> IO Grid
-run viz lines batchSize gridSize minStart maxWords gas = do
+run viz lines batchSize gridSize minStart minWords gas = do
   batch <- List.sortBy (flip compare) . take batchSize <$> Random.shuffleM lines
   let tmap = makeTemplateMap batch
-  observeT $ generateGrid viz batch tmap gridSize minStart maxWords gas
+  observeT $ generateGrid viz batch tmap gridSize minStart minWords gas
