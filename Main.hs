@@ -70,7 +70,7 @@ optionsInfo :: ParserInfo Options
 optionsInfo =
   info (options <**> helper)
       (  fullDesc
-      <> progDesc "Generate a crossword puzzle"
+      <> progDesc "Generate a sparse crossword puzzle, i.e. given a list of dictionary words and their clues, find a populated grid that solves for the given constraints."
       )
 
 main :: IO ()
