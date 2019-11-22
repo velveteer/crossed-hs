@@ -8,7 +8,7 @@ module Crossed
 import Prelude hiding (Word)
 
 import Control.Applicative (ZipList(..))
-import Control.Monad (MonadPlus(..), guard)
+import Control.Monad (MonadPlus(..), guard, unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logic
 import Control.Monad.Random (evalRandIO, uniform)
@@ -36,8 +36,8 @@ clue = (!!0) . BS.split '\t'
 type Template = (Int, Char)
 type TemplateMap = Map Template [(Word, Clue)]
 
-linesToMap :: [Line] -> TemplateMap
-linesToMap bss = Map.unionsWith (++) $ toMap <$> bss
+makeTemplateMap :: [Line] -> TemplateMap
+makeTemplateMap bss = Map.unionsWith (++) $ toMap <$> bss
   where mapping bs str = zip (zip [0..] str) (repeat [(word bs, clue bs)])
         toMap bs = Map.fromList . mapping bs . BS.unpack $ word bs
 
@@ -63,11 +63,11 @@ type Grid = [GWord]
 buildGWord :: (Int, Int) -> Direction -> (Word, Clue) -> GWord
 buildGWord (x,y) d (w, c) = GWord x y (BS.length w) d w c
 
-generateGrid :: (MonadIO m, MonadPlus m) => [Line] -> TemplateMap -> Int -> Int -> Int -> m Grid
-generateGrid batch tmap size minStart maxWords = do
+generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int -> Int -> Int -> m Grid
+generateGrid v batch tmap size minStart maxWords = do
   (gword, grid) <- placeInitialWord batch minStart
   let loop gw g k = do
-        (gword', grid') <- placeNextWord size g tmap gw
+        (gword', grid') <- placeNextWord v size g tmap gw
         if k == 0
         then pure grid'
         else loop gword' grid' (k - 1)
@@ -79,11 +79,14 @@ placeInitialWord batch minStart = do
   guard $ l gword >= minStart
   pure (gword, gword:mempty)
 
-placeNextWord :: (MonadIO m, MonadPlus m) => Int -> Grid -> TemplateMap -> GWord -> m (GWord, Grid)
-placeNextWord size grid tmap active = do
+placeNextWord :: (MonadIO m, MonadPlus m) => Bool -> Int -> Grid -> TemplateMap -> GWord -> m (GWord, Grid)
+placeNextWord viz size grid tmap active = do
   possibleWords <- liftIO $ getNextWords size grid tmap active
   nextWord <- msum [pure x | x <- possibleWords]
   guard $ canPlaceWord size grid nextWord
+  when viz $ liftIO $ printGrid viz size (nextWord:grid)
+  when viz $ liftIO $ putStrLn (replicate (size * 6) '=')
+  when viz $ liftIO $ putStrLn ""
   pure (nextWord, nextWord:grid)
 
 canPlaceWord :: Int -> Grid -> GWord -> Bool
@@ -144,8 +147,8 @@ matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
 
 matchAllTemplates :: (MonadPlus m, MonadIO m) => TemplateMap -> GWord -> [Placement] -> m [GWord]
 matchAllTemplates tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
-  let candidates = concatMap (matchTemplate tmap) (templates plc)
-      cds =   Set.toList
+  candidates <- liftIO $ Random.shuffleM (concatMap (matchTemplate tmap) (templates plc))
+  let cds =   Set.toList
             . Set.fromList
             $ concat
             $ filter (not . null)
@@ -213,8 +216,8 @@ getPlacements start size grid gw =
         <*> ZipList [Across]
         <*> ZipList [(,) <$> (flip (-) start . cx) <*> cc <$> filter (\c -> cy c == cy cell && cx c >= start) gcs]
 
-printGrid :: Int -> Grid -> IO ()
-printGrid size grid = do
+printGrid :: Bool -> Int -> Grid -> IO ()
+printGrid viz size grid = do
   for_ [0..size] $ \i -> do
     for_ [0..size] $ \j -> do
       let mChar = cc <$> List.find
@@ -227,7 +230,7 @@ printGrid size grid = do
           putStr $ "  " ++ [c] ++ "  "
     putStrLn "\n"
   putStrLn "\n"
-  printClues grid
+  unless viz $ printClues grid
 
 printClues :: Grid -> IO ()
 printClues grid = do
@@ -240,8 +243,8 @@ printClues grid = do
     putStrLn "Down"
     putStrLn $ show (num :: Int) ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
 
-run :: [Line] -> Int -> Int -> Int -> Int -> IO Grid
-run lines batchSize gridSize minStart maxWords = do
+run :: Bool -> [Line] -> Int -> Int -> Int -> Int -> IO Grid
+run viz lines batchSize gridSize minStart maxWords = do
   batch <- List.sortBy (flip compare) . take batchSize <$> Random.shuffleM lines
-  let tmap = linesToMap batch
-  observeT $ generateGrid batch tmap gridSize minStart maxWords
+  let tmap = makeTemplateMap batch
+  observeT $ generateGrid viz batch tmap gridSize minStart maxWords

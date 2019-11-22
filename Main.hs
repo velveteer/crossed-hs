@@ -1,7 +1,5 @@
 module Main where
 
-import Control.Concurrent.Async (async, waitAny)
-import Control.Monad (replicateM)
 import System.Environment (getArgs)
 import qualified Data.ByteString.Char8 as BS
 
@@ -14,7 +12,7 @@ main = do
       gridSize = read $ args !! 1
       minStart = read $ args !! 2
       maxWords = read $ args !! 3
+      visualize = read $ args !! 4
   lines <- BS.lines <$> BS.readFile "clues-desc.tsv"
-  runs <- replicateM 4 $ async (run lines batchSize gridSize minStart maxWords)
-  (_, grid) <- waitAny runs
-  printGrid gridSize grid
+  grid <- run visualize lines batchSize gridSize minStart maxWords
+  printGrid False gridSize grid
