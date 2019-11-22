@@ -33,4 +33,5 @@ executable crossed-exe
     , base 
     , bytestring
     , crossed
+    , optparse-applicative
   default-language: Haskell2010

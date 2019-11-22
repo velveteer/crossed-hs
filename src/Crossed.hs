@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings          #-}
 
 module Crossed
   ( printGrid
@@ -67,7 +67,7 @@ buildGWord (x,y) d (w, c) = GWord x y (BS.length w) d w c
 generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int -> Int -> Int -> Int -> m Grid
 generateGrid v batch tmap size minStart maxWords gas = do
   (gword, grid) <- placeInitialWord batch minStart
-  asRef <- liftIO $ newIORef 0
+  asRef <- liftIO $ newIORef (0 :: Int)
   let loop gw g k = do
         (gword', grid') <- placeNextWord v size g tmap gw
         liftIO $ modifyIORef' asRef (+1)
