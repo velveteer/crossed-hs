@@ -13,6 +13,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logic
 import Control.Monad.Random (evalRandIO, uniform)
 import Data.Foldable (for_)
+import Data.IORef
 import Data.Map.Strict (Map)
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Ord (comparing)
@@ -63,12 +64,15 @@ type Grid = [GWord]
 buildGWord :: (Int, Int) -> Direction -> (Word, Clue) -> GWord
 buildGWord (x,y) d (w, c) = GWord x y (BS.length w) d w c
 
-generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int -> Int -> Int -> m Grid
-generateGrid v batch tmap size minStart maxWords = do
+generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int -> Int -> Int -> Int -> m Grid
+generateGrid v batch tmap size minStart maxWords gas = do
   (gword, grid) <- placeInitialWord batch minStart
+  asRef <- liftIO $ newIORef 0
   let loop gw g k = do
         (gword', grid') <- placeNextWord v size g tmap gw
-        if k == 0
+        liftIO $ modifyIORef' asRef (+1)
+        as <- liftIO $ readIORef asRef
+        if as > gas || k == 0
         then pure grid'
         else loop gword' grid' (k - 1)
   loop gword grid (maxWords - 2)
@@ -147,16 +151,16 @@ matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
 
 matchAllTemplates :: (MonadPlus m, MonadIO m) => TemplateMap -> GWord -> [Placement] -> m [GWord]
 matchAllTemplates tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
-  candidates <- liftIO $ Random.shuffleM (concatMap (matchTemplate tmap) (templates plc))
-  let cds =   Set.toList
+  let candidates = concatMap (matchTemplate tmap) (templates plc)
+  let words = Set.toList
             . Set.fromList
             $ concat
             $ filter (not . null)
             $ List.groupBy (\a b -> fst a == fst b) candidates
-  if null cds
+  if null words
   then pure Nothing
   else do
-    word <- liftIO . evalRandIO $ uniform cds
+    word <- liftIO . evalRandIO $ uniform words
     pure $
       Just $ buildGWord
       (startX plc, startY plc)
@@ -243,8 +247,8 @@ printClues grid = do
     putStrLn "Down"
     putStrLn $ show (num :: Int) ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
 
-run :: Bool -> [Line] -> Int -> Int -> Int -> Int -> IO Grid
-run viz lines batchSize gridSize minStart maxWords = do
+run :: Bool -> [Line] -> Int -> Int -> Int -> Int -> Int -> IO Grid
+run viz lines batchSize gridSize minStart maxWords gas = do
   batch <- List.sortBy (flip compare) . take batchSize <$> Random.shuffleM lines
   let tmap = makeTemplateMap batch
-  observeT $ generateGrid viz batch tmap gridSize minStart maxWords
+  observeT $ generateGrid viz batch tmap gridSize minStart maxWords gas

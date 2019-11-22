@@ -12,7 +12,8 @@ main = do
       gridSize = read $ args !! 1
       minStart = read $ args !! 2
       maxWords = read $ args !! 3
-      visualize = read $ args !! 4
+      gas = read $ args !! 4
+      visualize = read $ args !! 5
   lines <- BS.lines <$> BS.readFile "clues-desc.tsv"
-  grid <- run visualize lines batchSize gridSize minStart maxWords
+  grid <- run visualize lines batchSize gridSize minStart maxWords gas
   printGrid False gridSize grid
