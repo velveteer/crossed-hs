@@ -43,12 +43,13 @@ makeTemplateMap bss = Map.unionsWith (++) $ toMap <$> bss
 data Direction = Across | Down deriving (Eq, Show)
 
 data GWord =
-  GWord { x :: !Int
-        , y :: !Int
-        , l :: !Int
-        , d :: !Direction
-        , w :: !BS.ByteString
-        , c :: !BS.ByteString
+  GWord { x  :: !Int
+        , y  :: !Int
+        , l  :: !Int
+        , d  :: !Direction
+        , w  :: !BS.ByteString
+        , c  :: !BS.ByteString
+        , bs :: ![(Int, Int)]
         } deriving (Eq, Show)
 
 data Cell =
@@ -59,8 +60,17 @@ data Cell =
 
 type Grid = [GWord]
 
+xys :: [Cell] -> [(Int, Int)]
+xys = fmap ((,) <$> cx <*> cy )
+
 buildGWord :: (Int, Int) -> Direction -> (Word, Clue) -> GWord
-buildGWord (x,y) d (w, c) = GWord x y (BS.length w) d w c
+buildGWord (x,y) d (w, c) =
+  let l = BS.length w
+      bs = if d == Down
+           then [(x, y - 1), (x, y + l)]
+           else [(x - 1, y), (x + l, y)]
+  in
+  GWord x y l d w c bs
 
 generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int -> Int -> Int -> Int -> m Grid
 generateGrid v batch tmap size minStart minWords gas = do
@@ -94,49 +104,37 @@ placeNextWord viz size grid tmap active = do
 canPlaceWord :: Int -> Grid -> GWord -> Bool
 canPlaceWord size g gw =
   let gwcs = getCells gw
+      gwxys = xys gwcs
       gcs  = getGrid size g
-      xys = fmap ((,) <$> cx <*> cy )
+      blocks = bs `concatMap` g
       acrossWords = filter (\gw -> d gw == Across) g
       downWords = filter (\gw -> d gw == Down) g
-      acrossCells = xys $ getCells `concatMap` acrossWords
-      downCells = xys $ getCells `concatMap` downWords
+      acrossXys = xys $ getCells `concatMap` acrossWords
+      downXys = xys $ getCells `concatMap` downWords
       gridCells = getCells `concatMap` g
-      starts = head . xys . getCells <$> g
-      lasts = last . xys . getCells <$> g
       maxX = cx $ List.maximumBy (comparing cx) gcs
       maxY = cy $ List.maximumBy (comparing cy) gcs
-      overlapsX = any (`elem` acrossCells) (xys gwcs)
-      overlapsY = any (`elem` downCells) (xys gwcs)
       intersectsMatch =
         List.intersectBy (\a b -> cx a == cx b && cy a == cy b) gridCells gwcs
         ==
         List.intersectBy (\a b -> cx a == cx b && cy a == cy b && cc a == cc b) gridCells gwcs
+      isWithinBounds = all (\gwc -> cx gwc <= maxX && cy gwc <= maxY) gwcs
+      isUnique = w gw `notElem` (w <$> g)
+      isNotBlocked = all (`notElem` blocks) gwxys && all (`notElem` xys gridCells) (bs gw)
+      isNotAdjacent =
+        if d gw == Down
+        then
+          all (\(gwx, gwy) -> (gwx + 1, gwy) `notElem` downXys) gwxys &&
+          all (\(gwx, gwy) -> (gwx - 1, gwy) `notElem` downXys) gwxys
+        else
+          all (\(gwx, gwy) -> (gwx, gwy + 1) `notElem` acrossXys) gwxys &&
+          all (\(gwx, gwy) -> (gwx, gwy - 1) `notElem` acrossXys) gwxys
   in
-     w gw `notElem` (w <$> g)
-     && all (\gwc -> cx gwc <= maxX && cy gwc <= maxY) gwcs
-     && (if d gw == Across then not overlapsX else not overlapsY)
+        isWithinBounds
+     && isUnique
      && intersectsMatch
-     && if d gw == Down
-        then all (\c -> (cx c + 1, cy c - 1) `notElem` downCells) gwcs
-             && all (\c -> (cx c - 1, cy c + 1) `notElem` downCells) gwcs
-             && all (\c -> (cx c, cy c - 1) `notElem` downCells) gwcs
-             && all (\c -> (cx c, cy c + 1) `notElem` downCells) gwcs
-             && all (\c -> (cx c + 1, cy c) `notElem` starts) gwcs
-             && all (\c -> (cx c - 1, cy c) `notElem` lasts) gwcs
-             && all (\c -> (cx c, cy c + 1) `notElem` lasts) gwcs
-             && (x gw, y gw - 1) `notElem` acrossCells
-             && (x gw, y gw + 1) `notElem` acrossCells
-             && (x gw, y gw + l gw) `notElem` acrossCells
-        else all (\c -> (cx c - 1, cy c + 1) `notElem` acrossCells) gwcs
-             && all (\c -> (cx c + 1, cy c - 1) `notElem` acrossCells) gwcs
-             && all (\c -> (cx c - 1, cy c) `notElem` acrossCells) gwcs
-             && all (\c -> (cx c + 1, cy c) `notElem` acrossCells) gwcs
-             && all (\c -> (cx c, cy c + 1) `notElem` starts) gwcs
-             && all (\c -> (cx c, cy c - 1) `notElem` lasts) gwcs
-             && all (\c -> (cx c, cy c + 1) `notElem` lasts) gwcs
-             && (x gw - 1, y gw) `notElem` downCells
-             && (x gw + 1, y gw) `notElem` downCells
-             && (x gw + l gw, y gw) `notElem` downCells
+     && isNotBlocked
+     && isNotAdjacent
 
 getNextWords :: (MonadPlus m, MonadIO m) => Int -> Grid -> TemplateMap -> GWord -> m [GWord]
 getNextWords size g tmap gw = do
