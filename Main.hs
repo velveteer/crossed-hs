@@ -6,7 +6,7 @@ import Options.Applicative
 import System.Environment (getArgs)
 import qualified Data.ByteString.Char8 as BS
 
-import Crossed (printGrid, run)
+import Crossed (printClues, printGrid, run)
 
 data Options =
   Options
@@ -78,4 +78,5 @@ main = do
   Options{..} <- execParser optionsInfo
   lines <- BS.lines <$> BS.readFile "clues-desc.tsv"
   grid <- run visualize lines batchSize gridSize minStart words gas
-  printGrid False gridSize grid
+  printGrid gridSize grid
+  printClues grid

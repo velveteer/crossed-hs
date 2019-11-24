@@ -1,7 +1,8 @@
 {-# LANGUAGE OverloadedStrings          #-}
 
 module Crossed
-  ( printGrid
+  ( printClues
+  , printGrid
   , run
   ) where
 
@@ -43,13 +44,14 @@ makeTemplateMap bss = Map.unionsWith (++) $ toMap <$> bss
 data Direction = Across | Down deriving (Eq, Show)
 
 data GWord =
-  GWord { x  :: !Int
-        , y  :: !Int
-        , l  :: !Int
-        , d  :: !Direction
-        , w  :: !BS.ByteString
-        , c  :: !BS.ByteString
-        , bs :: ![(Int, Int)]
+  GWord { x   :: !Int
+        , y   :: !Int
+        , l   :: !Int
+        , d   :: !Direction
+        , w   :: !BS.ByteString
+        , c   :: !BS.ByteString
+        , bs  :: ![(Int, Int)]
+        , num :: !Int
         } deriving (Eq, Show)
 
 data Cell =
@@ -70,7 +72,7 @@ buildGWord (x,y) d (w, c) =
            then [(x, y - 1), (x, y + l)]
            else [(x - 1, y), (x + l, y)]
   in
-  GWord x y l d w c bs
+  GWord x y l d w c bs 0
 
 generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int -> Int -> Int -> Int -> m Grid
 generateGrid v batch tmap size minStart minWords gas = do
@@ -83,7 +85,7 @@ generateGrid v batch tmap size minStart minWords gas = do
         if as > gas || (length grid' == minWords)
         then pure grid'
         else loop gword' grid'
-  loop gword grid
+  annotateGrid <$> loop gword grid
 
 placeInitialWord :: (MonadIO m, MonadPlus m) => [Line] -> Int -> m (GWord, Grid)
 placeInitialWord batch minStart = do
@@ -96,9 +98,10 @@ placeNextWord viz size grid tmap active = do
   possibleWords <- liftIO $ getNextWords size grid tmap active
   nextWord <- msum [pure x | x <- possibleWords]
   guard $ canPlaceWord size grid nextWord
-  when viz $ liftIO $ printGrid viz size (nextWord:grid)
-  when viz $ liftIO $ putStrLn (replicate (size * 6) '=')
-  when viz $ liftIO $ putStrLn ""
+  when viz $ liftIO $ printGrid size (nextWord:grid)
+  when viz $ liftIO $ putStrLn "\n"
+  when viz $ liftIO $ putStrLn (concat $ replicate (size * 2) " = ")
+  when viz $ liftIO $ putStrLn "\n"
   pure (nextWord, nextWord:grid)
 
 canPlaceWord :: Int -> Grid -> GWord -> Bool
@@ -216,8 +219,8 @@ getPlacements start size grid gw =
         <*> ZipList [Across]
         <*> ZipList [(,) <$> (flip (-) start . cx) <*> cc <$> filter (\c -> cy c == cy cell && cx c >= start) gcs]
 
-printGrid :: Bool -> Int -> Grid -> IO ()
-printGrid viz size grid = do
+printGrid :: Int -> Grid -> IO ()
+printGrid size grid =
   for_ [0..size] $ \i -> do
     for_ [0..size] $ \j -> do
       let mChar = cc <$> List.find
@@ -229,19 +232,25 @@ printGrid viz size grid = do
         Just c ->
           putStr $ "  " ++ [c] ++ "  "
     putStrLn "\n"
-  putStrLn "\n"
-  unless viz $ printClues grid
 
 printClues :: Grid -> IO ()
 printClues grid = do
-  let across = zip [1..] (filter ((==) Across . d) grid)
-      down = zip [1..] (filter ((==) Down . d) grid)
-  for_ across $ \(num, gword) -> do
+  let across = filter ((==) Across . d) grid
+      down = filter ((==) Down . d) grid
+  for_ across $ \gword -> do
     putStrLn "Across"
-    putStrLn $ show (num :: Int) ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
-  for_ down $ \(num, gword) -> do
+    putStrLn $ show (num gword) ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
+  for_ down $ \gword -> do
     putStrLn "Down"
-    putStrLn $ show (num :: Int) ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
+    putStrLn $ show (num gword) ++ ". " ++ show (w gword) ++ ": " ++ show (c gword)
+
+annotateGrid :: Grid -> Grid
+annotateGrid g =
+  let sorted = List.sortOn x g
+      across = zip [1..] $ List.sortOn y $ filter ((==) Across . d) sorted
+      down = zip [1..] $ List.sortOn y $ filter ((==) Down . d) sorted
+      setNum (i, gw) = gw { num = i }
+  in setNum <$> across <> down
 
 run :: Bool -> [Line] -> Int -> Int -> Int -> Int -> Int -> IO Grid
 run viz lines batchSize gridSize minStart minWords gas = do
