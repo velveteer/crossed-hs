@@ -24,7 +24,7 @@ Available options:
   -g,--gridSize INT        Length and width of the grid. (default: 15)
   -s,--minStart INT        Minimum length for starting word. (default: 5)
   -w,--words INT           Number of words needed for a solution. Increases
-                           generation time. (default: 36)
+                           generation time. (default: 40)
   -l,--checkLimit INT      Number of word placement attempts made before
                            returning a solution. (default: 200)
   -h,--help                Show this help text

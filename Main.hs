@@ -54,7 +54,7 @@ options = Options
       <> short 'w'
       <> help "Number of words needed for a solution. Increases generation time."
       <> showDefault
-      <> value 36
+      <> value 40
       <> metavar "INT"
       )
   <*> option auto

@@ -145,6 +145,7 @@ getNextWords size g tmap gw = do
   let end = if d gw == Across then y gw else x gw
       plcs = concat $ getPlacements <$> [0..end] <*> [size] <*> [g] <*> [gw]
   matchAllTemplates size tmap gw plcs
+{-# INLINE getNextWords #-}
 
 matchTemplate :: TemplateMap -> Template -> [(Word, Clue)]
 matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
@@ -153,7 +154,7 @@ matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
 matchAllTemplates :: (MonadPlus m, MonadIO m) => Int -> TemplateMap -> GWord -> [Placement] -> m [GWord]
 matchAllTemplates size tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
   let candidates = concatMap (matchTemplate tmap) (templates plc)
-  let words = filter (\(w, _) -> BS.length w < (size `div` 2) )
+  let words = filter (\(w, _) -> BS.length w < size `div` 2)
             . Set.toList
             . Set.fromList
             $ concat
@@ -168,6 +169,7 @@ matchAllTemplates size tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
       (startX plc, startY plc)
       (d $ switchDirection gword)
       word
+{-# INLINE matchAllTemplates #-}
 
 data Placement =
   Placement
