@@ -19,13 +19,15 @@ Usage: crossed-exe [-v|--visualize] [-b|--batchSize INT] [-g|--gridSize INT]
 Available options:
   -v,--visualize           Print intermediate grids during generation.
   -b,--batchSize INT       Control the available word pool. Taken from a random
-                           shuffle of ~283,000 words. (default: 300)
+                           shuffle of ~283,000 words. Increases generation
+                           time. (default: 1000)
   -g,--gridSize INT        Length and width of the grid. (default: 15)
   -s,--minStart INT        Minimum length for starting word. (default: 5)
   -w,--words INT           Number of words needed for a solution. Increases
-                           generation time. (default: 30)
+                           generation time. (default: 36)
   -l,--checkLimit INT      Number of word placement attempts made before
-                           returning a solution. (default: 100)
+                           returning a solution. (default: 200)
   -h,--help                Show this help text
+
 ```
 

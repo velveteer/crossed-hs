@@ -138,20 +138,23 @@ canPlaceWord size g gw =
      && intersectsMatch
      && isNotBlocked
      && isNotAdjacent
+{-# INLINE canPlaceWord #-}
 
 getNextWords :: (MonadPlus m, MonadIO m) => Int -> Grid -> TemplateMap -> GWord -> m [GWord]
 getNextWords size g tmap gw = do
   let end = if d gw == Across then y gw else x gw
       plcs = concat $ getPlacements <$> [0..end] <*> [size] <*> [g] <*> [gw]
-  matchAllTemplates tmap gw plcs
+  matchAllTemplates size tmap gw plcs
 
 matchTemplate :: TemplateMap -> Template -> [(Word, Clue)]
 matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
+{-# INLINE matchTemplate #-}
 
-matchAllTemplates :: (MonadPlus m, MonadIO m) => TemplateMap -> GWord -> [Placement] -> m [GWord]
-matchAllTemplates tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
+matchAllTemplates :: (MonadPlus m, MonadIO m) => Int -> TemplateMap -> GWord -> [Placement] -> m [GWord]
+matchAllTemplates size tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
   let candidates = concatMap (matchTemplate tmap) (templates plc)
-  let words = Set.toList
+  let words = filter (\(w, _) -> BS.length w < (size `div` 2) )
+            . Set.toList
             . Set.fromList
             $ concat
             $ filter (not . null)
@@ -166,35 +169,12 @@ matchAllTemplates tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
       (d $ switchDirection gword)
       word
 
-switchDirection :: GWord -> GWord
-switchDirection gword = gword { d = if d gword == Across then Down else Across }
-
-getCells :: GWord -> [Cell]
-getCells gw =
-  case d gw of
-    Across ->
-      getZipList $
-        Cell <$> ZipList (BS.unpack (w gw))
-             <*> ZipList [x gw..]
-             <*> ZipList (repeat $ y gw)
-    Down ->
-      getZipList $
-        Cell <$> ZipList (BS.unpack (w gw))
-             <*> ZipList (repeat $ x gw)
-             <*> ZipList [y gw..]
-
-getGrid :: Int -> Grid -> [Cell]
-getGrid size grid =
-    List.unionBy (\a b -> cx a == cx b && cy a == cy b)
-    (concatMap getCells grid)
-    (Cell <$> [' '] <*> [0..size] <*> [0..size])
-
 data Placement =
   Placement
     { startX    :: !Int
     , startY    :: !Int
     , direction :: !Direction
-    , templates :: [Template]
+    , templates :: ![Template]
     } deriving (Eq, Show)
 
 getPlacements :: Int -> Int -> Grid -> GWord -> [Placement]
@@ -218,6 +198,33 @@ getPlacements start size grid gw =
         <*> ZipList [cy cell]
         <*> ZipList [Across]
         <*> ZipList [(,) <$> (flip (-) start . cx) <*> cc <$> filter (\c -> cy c == cy cell && cx c >= start) gcs]
+{-# INLINE getPlacements #-}
+
+switchDirection :: GWord -> GWord
+switchDirection gword = gword { d = if d gword == Across then Down else Across }
+{-# INLINE switchDirection #-}
+
+getCells :: GWord -> [Cell]
+getCells gw =
+  case d gw of
+    Across ->
+      getZipList $
+        Cell <$> ZipList (BS.unpack (w gw))
+             <*> ZipList [x gw..]
+             <*> ZipList (repeat $ y gw)
+    Down ->
+      getZipList $
+        Cell <$> ZipList (BS.unpack (w gw))
+             <*> ZipList (repeat $ x gw)
+             <*> ZipList [y gw..]
+{-# INLINE getCells #-}
+
+getGrid :: Int -> Grid -> [Cell]
+getGrid size grid =
+    List.unionBy (\a b -> cx a == cx b && cy a == cy b)
+    (concatMap getCells grid)
+    (Cell <$> [' '] <*> [0..size] <*> [0..size])
+{-# INLINE getGrid #-}
 
 printGrid :: Int -> Grid -> IO ()
 printGrid size grid =
