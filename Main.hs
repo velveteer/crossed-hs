@@ -30,7 +30,7 @@ options = Options
       <> short 'b'
       <> help "Control the available word pool. Taken from a random shuffle of ~283,000 words. Increases generation time."
       <> showDefault
-      <> value 1000
+      <> value 500
       <> metavar "INT"
       )
   <*> option auto

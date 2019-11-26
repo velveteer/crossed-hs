@@ -10,7 +10,7 @@ import Prelude hiding (Word)
 
 import Control.Applicative (ZipList(..))
 import Control.Monad.Logic
-import Control.Monad.Random (evalRandIO, uniform)
+import Control.Monad.Random (getRandomR, evalRandIO, uniform)
 import Data.Foldable (for_)
 import Data.IORef
 import Data.Map.Strict (Map)
@@ -76,20 +76,23 @@ buildGWord (x,y) d (w, c) =
 
 generateGrid :: (MonadIO m, MonadPlus m) => Bool -> [Line] -> TemplateMap -> Int -> Int -> Int -> Int -> m Grid
 generateGrid v batch tmap size minStart minWords gas = do
-  (gword, grid) <- placeInitialWord batch minStart
+  (gword, grid) <- placeInitialWord size batch minStart
   asRef <- liftIO $ newIORef (0 :: Int)
   let loop gw g = do
-        (gword', grid') <- placeNextWord v size g tmap gw
-        liftIO $ modifyIORef' asRef (+1)
         as <- liftIO $ readIORef asRef
-        if as > gas || (length grid' == minWords)
-        then pure grid'
-        else loop gword' grid'
+        if as > gas || (length g == minWords)
+        then pure g
+        else do
+          liftIO $ modifyIORef' asRef (+1)
+          (gword', grid') <- placeNextWord v size g tmap gw
+          loop gword' grid'
   annotateGrid <$> loop gword grid
 
-placeInitialWord :: (MonadIO m, MonadPlus m) => [Line] -> Int -> m (GWord, Grid)
-placeInitialWord batch minStart = do
-  gword <- msum [pure $ buildGWord (0,0) Across (word x, clue x) | x <- batch]
+placeInitialWord :: (MonadIO m, MonadPlus m) => Int -> [Line] -> Int -> m (GWord, Grid)
+placeInitialWord size batch minStart = do
+  ix <- liftIO . evalRandIO $ getRandomR (0, size `div` 2)
+  iy <- liftIO . evalRandIO $ getRandomR (0, size `div` 2)
+  gword <- msum [pure $ buildGWord (ix,iy) Across (word x, clue x) | x <- batch]
   guard $ l gword >= minStart
   pure (gword, gword:mempty)
 
@@ -143,7 +146,7 @@ canPlaceWord size g gw =
 getNextWords :: (MonadPlus m, MonadIO m) => Int -> Grid -> TemplateMap -> GWord -> m [GWord]
 getNextWords size g tmap gw = do
   let end = if d gw == Across then y gw else x gw
-      plcs = concat $ getPlacements <$> [0..end] <*> [size] <*> [g] <*> [gw]
+      plcs = prunePlacement <$> concat (getPlacements <$> [0..end] <*> [size] <*> [g] <*> [gw])
   matchAllTemplates size tmap gw plcs
 {-# INLINE getNextWords #-}
 
@@ -154,11 +157,11 @@ matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
 matchAllTemplates :: (MonadPlus m, MonadIO m) => Int -> TemplateMap -> GWord -> [Placement] -> m [GWord]
 matchAllTemplates size tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
   let candidates = concatMap (matchTemplate tmap) (templates plc)
-  let words = filter (\(w, _) -> BS.length w < size `div` 2)
-            . Set.toList
+  let words = Set.toList
             . Set.fromList
-            $ concat
-            $ filter (not . null)
+            . filter (\(w, _) -> BS.length w < size `div` 2)
+            . concat
+            . filter (not . null)
             $ List.groupBy (\a b -> fst a == fst b) candidates
   if null words
   then pure Nothing
@@ -179,6 +182,10 @@ data Placement =
     , templates :: ![Template]
     } deriving (Eq, Show)
 
+prunePlacement :: Placement -> Placement
+prunePlacement plc =
+  plc { templates = filter (\(_, c) -> c /= ' ') (templates plc) }
+
 getPlacements :: Int -> Int -> Grid -> GWord -> [Placement]
 getPlacements start size grid gw =
   let gcs = getGrid size grid
@@ -191,12 +198,12 @@ getPlacements start size grid gw =
     Across -> concat $ flip fmap acrossCells $ \cell ->
       getZipList $ Placement
         <$> ZipList [cx cell]
-        <*> ZipList [start..]
+        <*> ZipList [start..size]
         <*> ZipList [Down]
         <*> ZipList [(,) <$> (flip (-) start . cy) <*> cc <$> filter (\c -> cx c == cx cell && cy c >= start) gcs]
     Down -> concat $ flip fmap downCells $ \cell ->
       getZipList $ Placement
-        <$> ZipList [start..]
+        <$> ZipList [start..size]
         <*> ZipList [cy cell]
         <*> ZipList [Across]
         <*> ZipList [(,) <$> (flip (-) start . cx) <*> cc <$> filter (\c -> cy c == cy cell && cx c >= start) gcs]
