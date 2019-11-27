@@ -30,7 +30,7 @@ options = Options
       <> short 'b'
       <> help "Control the available word pool. Taken from a random shuffle of ~283,000 words. Increases generation time."
       <> showDefault
-      <> value 500
+      <> value 1000
       <> metavar "INT"
       )
   <*> option auto
@@ -54,7 +54,7 @@ options = Options
       <> short 'w'
       <> help "Number of words needed for a solution. Increases generation time."
       <> showDefault
-      <> value 40
+      <> value 35
       <> metavar "INT"
       )
   <*> option auto
@@ -62,7 +62,7 @@ options = Options
       <> short 'l'
       <> help "Number of word placement attempts made before returning a solution."
       <> showDefault
-      <> value 200
+      <> value 100000
       <> metavar "INT"
       )
 

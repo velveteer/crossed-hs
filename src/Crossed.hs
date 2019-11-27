@@ -20,7 +20,6 @@ import Data.Traversable (for)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import qualified System.Random.Shuffle as Random
 
 type Line = BS.ByteString
@@ -83,8 +82,7 @@ generateGrid v batch tmap size minStart minWords gas = do
         if as > gas || (length g == minWords)
         then pure g
         else do
-          liftIO $ modifyIORef' asRef (+1)
-          (gword', grid') <- placeNextWord v size g tmap gw
+          (gword', grid') <- placeNextWord v size g tmap gw asRef
           loop gword' grid'
   annotateGrid <$> loop gword grid
 
@@ -96,10 +94,18 @@ placeInitialWord size batch minStart = do
   guard $ l gword >= minStart
   pure (gword, gword:mempty)
 
-placeNextWord :: (MonadIO m, MonadPlus m) => Bool -> Int -> Grid -> TemplateMap -> GWord -> m (GWord, Grid)
-placeNextWord viz size grid tmap active = do
+placeNextWord :: (MonadIO m, MonadPlus m)
+              => Bool
+              -> Int
+              -> Grid
+              -> TemplateMap
+              -> GWord
+              -> IORef Int
+              -> m (GWord, Grid)
+placeNextWord viz size grid tmap active asRef = do
   possibleWords <- liftIO $ getNextWords size grid tmap active
   nextWord <- msum [pure x | x <- possibleWords]
+  liftIO $ modifyIORef' asRef (+1)
   guard $ canPlaceWord size grid nextWord
   when viz $ liftIO $ printGrid size (nextWord:grid)
   when viz $ liftIO $ putStrLn "\n"
@@ -157,12 +163,7 @@ matchTemplate tmap tmp = fromMaybe mempty $ Map.lookup tmp tmap
 matchAllTemplates :: (MonadPlus m, MonadIO m) => Int -> TemplateMap -> GWord -> [Placement] -> m [GWord]
 matchAllTemplates size tmap gword plcs = fmap catMaybes $ for plcs $ \plc -> do
   let candidates = concatMap (matchTemplate tmap) (templates plc)
-  let words = Set.toList
-            . Set.fromList
-            . filter (\(w, _) -> BS.length w < size `div` 2)
-            . concat
-            . filter (not . null)
-            $ List.groupBy (\a b -> fst a == fst b) candidates
+      words = filter (\(w, _) -> BS.length w < size `div` 2) candidates
   if null words
   then pure Nothing
   else do
